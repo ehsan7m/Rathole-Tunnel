@@ -58,29 +58,41 @@ colorize() {
     echo -e "${style_code}${color_code}${text}${reset}"
 }
 
-# Function to install unzip if not already installed
-install_unzip() {
-    if ! command -v unzip &> /dev/null; then
-        # Check if the system is using apt package manager
+# --------------------------------------------------------------------------------------
+# تغییرات اصلی از اینجا شروع می‌شوند
+# --------------------------------------------------------------------------------------
+
+# **مسیر جدید برای فایل‌های فشرده core**
+# فرض بر این است که فایل‌های فشرده در دایرکتوری 'core' کنار rathole_v2.sh قرار دارند.
+LOCAL_CORE_DIR="$(dirname "$(readlink -f "$0")")/core" 
+
+# مسیر فایل‌های Core دانلود شده به صورت محلی
+LOCAL_RATHOLE_ZIP="$LOCAL_CORE_DIR/rathole.zip"
+# استفاده از rathole_modified_ubuntu22.zip برای هسته تغییر یافته
+LOCAL_RATHOLE_MODIFIED_ZIP="$LOCAL_CORE_DIR/rathole_modified_ubuntu22.zip"
+
+
+# Function to install python3 if not already installed (for zip extraction)
+install_python3() {
+    if ! command -v python3 &> /dev/null; then
         if command -v apt-get &> /dev/null; then
-            echo -e "${RED}unzip is not installed. Installing...${NC}"
+            echo -e "${RED}python3 is not installed. Installing...${NC}"
             sleep 1
             sudo apt-get update
-            sudo apt-get install -y unzip
+            sudo apt-get install -y python3
         else
-            echo -e "${RED}Error: Unsupported package manager. Please install unzip manually.${NC}\n"
+            echo -e "${RED}Error: Unsupported package manager. Please install python3 manually.${NC}\n"
             press_key
             exit 1
         fi
     fi
 }
-# Install unzip
-install_unzip
+# Install python3
+install_python3
 
-#Function to install cron if not already installed
+# Function to install cron if not already installed
 install_cron() {
     if ! command -v cron &> /dev/null; then
-        # Check if the system is using apt package manager
         if command -v apt-get &> /dev/null; then
             echo -e "${RED}cron is not installed. Installing...${NC}"
             sleep 1
@@ -100,7 +112,6 @@ install_cron
 # Function to install jq if not already installed
 install_jq() {
     if ! command -v jq &> /dev/null; then
-        # Check if the system is using apt package manager
         if command -v apt-get &> /dev/null; then
             echo -e "${RED}jq is not installed. Installing...${NC}"
             sleep 1
@@ -118,8 +129,60 @@ install_jq() {
 install_jq
 
 config_dir="/root/rathole-core"
+# Function to extract Rathole Core using Python (بازنویسی شده)
+extract_zip_with_python() {
+    local zip_file="$1"
+    local extract_dir="$2"
+    local python_script_path=$(mktemp /tmp/extract_zip_XXXXXX.py) # ایجاد فایل پایتون موقت
 
-# Function to download and extract Rathole Core
+    if [ ! -f "$zip_file" ]; then
+        colorize red "Error: Zip file not found at $zip_file. Please ensure the correct zip file is in the '$LOCAL_CORE_DIR' directory." bold
+        sleep 2
+        return 1
+    fi
+
+    # ایجاد دایرکتوری مقصد در صورت عدم وجود
+    mkdir -p "$extract_dir"
+
+    colorize green "Extracting $zip_file using Python..." bold
+    sleep 1
+
+    # نوشتن کد پایتون به داخل فایل موقت
+    cat << EOF > "$python_script_path"
+import zipfile
+import os
+import sys
+
+zip_file = sys.argv[1]
+extract_dir = sys.argv[2]
+
+try:
+    with zipfile.ZipFile(zip_file, 'r') as zip_ref:
+        zip_ref.extractall(extract_dir)
+    print("Extraction completed successfully.")
+    sys.exit(0)
+except Exception as e:
+    print(f"Error extracting zip file: {e}")
+    sys.exit(1)
+EOF
+
+    # اجرای فایل پایتون موقت
+    python3 "$python_script_path" "$zip_file" "$extract_dir"
+    local python_exit_code=$?
+
+    # حذف فایل پایتون موقت
+    rm -f "$python_script_path"
+
+    if [ $python_exit_code -eq 0 ]; then
+        return 0
+    else
+        colorize red "Error: Failed to extract $zip_file." bold
+        sleep 2
+        return 1
+    fi
+}
+
+# Function to download and extract Rathole Core (تغییر یافته برای آفلاین)
 download_and_extract_rathole() {
     # check if core installed already
     if [[ -f "${config_dir}/rathole" ]]; then
@@ -127,45 +190,20 @@ download_and_extract_rathole() {
         	echo 
             colorize green "Rathole Core is already installed." bold
         	sleep 1
-        fi
+       	fi 
         return 1
     fi
 
-    # --- شروع تغییرات برای استفاده از فایل محلی ---
-
-    # مسیر اصلی مخزن Rathole-Tunnel را تعریف کنید
-    # این متغیر برای پیدا کردن فایل فشرده محلی Rathole استفاده می‌شود
-    # فرض بر این است که اسکریپت در مسیر اصلی Rathole-Tunnel اجرا می‌شود
-    RTH_TUNNEL_DIR="$HOME/Rathole-Tunnel" # مسیر را به صورت مطلق و دقیق مشخص کنید
-    
-    # تعریف مسیر محلی برای فایل فشرده Rathole مورد نظر
-    LOCAL_RATHOL_ZIP_PATH="$RTH_TUNNEL_DIR/core/rathole_modified_ubuntu22.zip"
-    
-    # نام فایل فشرده موقت که در حین عملیات از آن استفاده می‌شود
-    TEMP_ZIP_NAME="rathole.zip" # نام موقت برای فایل فشرده در دایرکتوری موقت
-
-    # بررسی وجود فایل فشرده محلی
-    if [ ! -f "$LOCAL_RATHOL_ZIP_PATH" ]; then
-        echo "خطا: فایل فشرده Rathole در مسیر مشخص شده پیدا نشد: $LOCAL_RATHOL_ZIP_PATH"
-        echo "لطفاً اطمینان حاصل کنید که 'rathole_modified_ubuntu22.zip' در دایرکتوری 'core' مخزن Rathole-Tunnel قرار دارد."
-        exit 1 # یا return 1 اگر می‌خواهید اسکریپت ادامه یابد اما نصب Rathole انجام نشود
+    # به جای دانلود، از فایل محلی rathole.zip استفاده می‌کنیم
+    colorize green "Using local Rathole Core file: $LOCAL_RATHOLE_ZIP..." bold
+    if ! extract_zip_with_python "$LOCAL_RATHOLE_ZIP" "$config_dir"; then
+        colorize red "Failed to install Rathole Core from local file. Exiting." bold
+        exit 1
     fi
-
-    # کپی کردن فایل فشرده محلی به دایرکتوری کاری موقت برای استخراج
-    echo "در حال استفاده از فایل فشرده محلی Rathole: $LOCAL_RATHOL_ZIP_PATH"
-    DOWNLOAD_DIR=$(mktemp -d) # ایجاد یک دایرکتوری موقت برای استخراج
-    cp "$LOCAL_RATHOL_ZIP_PATH" "$DOWNLOAD_DIR/$TEMP_ZIP_NAME" || { echo "خطا: کپی کردن فایل فشرده محلی Rathole ناموفق بود."; exit 1; }
-
-    # --- پایان تغییرات برای استفاده از فایل محلی ---
-
-    echo -e "در حال استخراج Rathole...\n"
-    sleep 1
-    unzip -q "$DOWNLOAD_DIR/$TEMP_ZIP_NAME" -d "$config_dir"
-    echo -e "${GREEN}نصب Rathole با موفقیت انجام شد.${NC}\n"
-    chmod u+x ${config_dir}/rathole
-    rm -rf "$DOWNLOAD_DIR" # حذف دایرکتوری موقت و فایل زیپ کپی شده در آن
+    
+    chmod u+x "${config_dir}/rathole" # اطمینان از قابلیت اجرا
+    colorize green "Rathole installation completed.${NC}\n"
 }
-
 
 #Download and extract the Rathole core
 download_and_extract_rathole
@@ -174,12 +212,9 @@ download_and_extract_rathole
 #SERVER_IP=$(hostname -I | awk '{print $1}')
 
 # Fetch server country
-SERVER_COUNTRY=$(curl --max-time 3 -sS "http://ipwhois.app/json/$SERVER_IP" | jq -r '.country')
+SERVER_COUNTRY="N/A (Offline Mode)" #
+SERVER_ISP="N/A (Offline Mode)" #
 
-# Fetch server isp 
-SERVER_ISP=$(curl --max-time 3 -sS "http://ipwhois.app/json/$SERVER_IP" | jq -r '.isp')
-
-# Function to display ASCII logo
 # Function to display ASCII logo
 display_logo() {   
     echo -e "${CYAN}"
@@ -225,7 +260,7 @@ check_ipv6() {
     ip="${ip#[}"
     ip="${ip%]}"
 
-    if [[ $ip =~ $ipv6_pattern ]]; then
+    if [[ $ip =~ "$ipv6_pattern" ]]; then
         return 0  # Valid IPv6 address
     else
         return 1  # Invalid IPv6 address
@@ -839,7 +874,7 @@ remove_core(){
 	colorize yellow "Do you want to remove rathole-core? (y/n)"
     read -r confirm
 	echo     
-	if [[ $confirm == [yY] ]]; then
+	if [[ "$confirm" == [yY] ]]; then
 	    if [[ -d "$config_dir" ]]; then
 	        rm -rf "$config_dir" >/dev/null 2>&1
 	        colorize green "Rathole-core directory removed." bold
@@ -867,7 +902,7 @@ destroy_tunnel(){
 	  rm -f "$config_path" >/dev/null 2>&1
 	fi
 
-    delete_cron_job $service_name
+    delete_cron_job "$service_name"
     
     # Stop and disable the client service if it exists
     if [[ -f "$service_path" ]]; then
@@ -1054,7 +1089,7 @@ add_cron_job_menu() {
     echo
     read -p "Enter your choice: " time_choice
     # Validate user input for restart time interval
-    case $time_choice in
+    case "$time_choice" in
         1)
             restart_time="*/30 * * * *"
             ;;
@@ -1084,7 +1119,7 @@ add_cron_job_menu() {
 
 
     # remove cronjob created by this script
-    delete_cron_job $service_name  > /dev/null 2>&1
+    delete_cron_job "$service_name" > /dev/null 2>&1
     
     # Path ro reset file
     reset_path="$config_dir/${service_name%.service}.sh"
@@ -1120,11 +1155,14 @@ view_service_status (){
 
 }
 
+# Function to update the script (این بخش نیز تغییر کرده تا از لوکال استفاده کند)
 update_script(){
 # Define the destination path
 DEST_DIR="/usr/bin/"
 RATHOLE_SCRIPT="rathole"
-SCRIPT_URL="https://github.com/Musixal/rathole-tunnel/raw/main/rathole_v2.sh"
+
+# **به جای دانلود از URL، از فایل محلی خود اسکریپت استفاده می‌کنیم**
+SCRIPT_SOURCE="$(dirname "$(readlink -f "$0")")/rathole_v2.sh" 
 
 echo
 # Check if rathole.sh exists in /bin/bash
@@ -1141,21 +1179,20 @@ if [ -f "$DEST_DIR/$RATHOLE_SCRIPT" ]; then
 else
     echo -e "${YELLOW}$RATHOLE_SCRIPT does not exist in $DEST_DIR. No need to remove.${NC}"
 fi
-# Download the new rathole.sh from the GitHub URL
-#echo -e "${CYAN}Downloading the new $RATHOLE_SCRIPT from $SCRIPT_URL...${NC}"
 
-curl -s -L -o "$DEST_DIR/$RATHOLE_SCRIPT" "$SCRIPT_URL"
+# کپی کردن اسکریپت از مسیر فعلی به مقصد
+echo -e "${CYAN}Copying the new $RATHOLE_SCRIPT from local source to $DEST_DIR...${NC}"
+cp "$SCRIPT_SOURCE" "$DEST_DIR/$RATHOLE_SCRIPT"
 
 echo
 if [ $? -eq 0 ]; then
-    #echo -e "${GREEN}New $RATHOLE_SCRIPT has been successfully downloaded to $DEST_DIR.${NC}\n"
     chmod +x "$DEST_DIR/$RATHOLE_SCRIPT"
     colorize yellow "Type 'rathole' to run the script.\n" bold
     colorize yellow "For removing script type: 'rm -rf /usr/bin/rathole\n" bold
     press_key
     exit 0
 else
-    echo -e "${RED}Failed to download $RATHOLE_SCRIPT from $SCRIPT_URL.${NC}"
+    echo -e "${RED}Failed to copy $RATHOLE_SCRIPT from local source to $DEST_DIR.${NC}"
     sleep 1
     return 1
 fi
@@ -1186,7 +1223,7 @@ ask_reboot() {
 # SYSCTL Optimization
 sysctl_optimizations() {
     ## Make a backup of the original sysctl.conf file
-    cp $SYS_PATH /etc/sysctl.conf.bak
+    cp "$SYS_PATH" /etc/sysctl.conf.bak
 
     echo 
     echo -e "${YELLOW}Default sysctl.conf file Saved. Directory: /etc/sysctl.conf.bak${NC}"
@@ -1459,62 +1496,59 @@ limits_optimizations() {
     sleep 0.5
 
     ## Clear old ulimits
-    sed -i '/ulimit -c/d' $PROF_PATH
-    sed -i '/ulimit -d/d' $PROF_PATH
-    sed -i '/ulimit -f/d' $PROF_PATH
-    sed -i '/ulimit -i/d' $PROF_PATH
-    sed -i '/ulimit -l/d' $PROF_PATH
-    sed -i '/ulimit -m/d' $PROF_PATH
-    sed -i '/ulimit -n/d' $PROF_PATH
-    sed -i '/ulimit -q/d' $PROF_PATH
-    sed -i '/ulimit -s/d' $PROF_PATH
-    sed -i '/ulimit -t/d' $PROF_PATH
-    sed -i '/ulimit -u/d' $PROF_PATH
-    sed -i '/ulimit -v/d' $PROF_PATH
-    sed -i '/ulimit -x/d' $PROF_PATH
-    sed -i '/ulimit -s/d' $PROF_PATH
+    sed -i '/ulimit -c/d' "$PROF_PATH"
+    sed -i '/ulimit -d/d' "$PROF_PATH"
+    sed -i '/ulimit -f/d' "$PROF_PATH"
+    sed -i '/ulimit -i/d' "$PROF_PATH"
+    sed -i '/ulimit -l/d' "$PROF_PATH"
+    sed -i '/ulimit -m/d' "$PROF_PATH"
+    sed -i '/ulimit -n/d' "$PROF_PATH"
+    sed -i '/ulimit -q/d' "$PROF_PATH"
+    sed -i '/ulimit -s/d' "$PROF_PATH"
+    sed -i '/ulimit -t/d' "$PROF_PATH"
+    sed -i '/ulimit -u/d' "$PROF_PATH"
+    sed -i '/ulimit -v/d' "$PROF_PATH"
+    sed -i '/ulimit -x/d' "$PROF_PATH"
+    sed -i '/ulimit -s/d' "$PROF_PATH"
 
 
     ## Add new ulimits
     ## The maximum size of core files created.
-    echo "ulimit -c unlimited" | tee -a $PROF_PATH
+    echo "ulimit -c unlimited" | tee -a "$PROF_PATH"
 
     ## The maximum size of a process's data segment
-    echo "ulimit -d unlimited" | tee -a $PROF_PATH
-
-    ## The maximum size of files created by the shell (default option)
-    echo "ulimit -f unlimited" | tee -a $PROF_PATH
+    echo "ulimit -d unlimited" | tee -a "$PROF_PATH"
 
     ## The maximum number of pending signals
-    echo "ulimit -i unlimited" | tee -a $PROF_PATH
+    echo "ulimit -i unlimited" | tee -a "$PROF_PATH"
 
     ## The maximum size that may be locked into memory
-    echo "ulimit -l unlimited" | tee -a $PROF_PATH
+    echo "ulimit -l unlimited" | tee -a "$PROF_PATH"
 
     ## The maximum memory size
-    echo "ulimit -m unlimited" | tee -a $PROF_PATH
+    echo "ulimit -m unlimited" | tee -a "$PROF_PATH"
 
     ## The maximum number of open file descriptors
-    echo "ulimit -n 1048576" | tee -a $PROF_PATH
+    echo "ulimit -n 1048576" | tee -a "$PROF_PATH"
 
     ## The maximum POSIX message queue size
-    echo "ulimit -q unlimited" | tee -a $PROF_PATH
+    echo "ulimit -q unlimited" | tee -a "$PROF_PATH"
 
     ## The maximum stack size
-    echo "ulimit -s -H 65536" | tee -a $PROF_PATH
-    echo "ulimit -s 32768" | tee -a $PROF_PATH
+    echo "ulimit -s -H 65536" | tee -a "$PROF_PATH"
+    echo "ulimit -s 32768" | tee -a "$PROF_PATH"
 
     ## The maximum number of seconds to be used by each process.
-    echo "ulimit -t unlimited" | tee -a $PROF_PATH
+    echo "ulimit -t unlimited" | tee -a "$PROF_PATH"
 
     ## The maximum number of processes available to a single user
-    echo "ulimit -u unlimited" | tee -a $PROF_PATH
+    echo "ulimit -u unlimited" | tee -a "$PROF_PATH"
 
     ## The maximum amount of virtual memory available to the process
-    echo "ulimit -v unlimited" | tee -a $PROF_PATH
+    echo "ulimit -v unlimited" | tee -a "$PROF_PATH"
 
     ## The maximum number of file locks
-    echo "ulimit -x unlimited" | tee -a $PROF_PATH
+    echo "ulimit -x unlimited" | tee -a "$PROF_PATH"
 
 
     echo 
@@ -1555,25 +1589,15 @@ read -p "Press Enter to continue..."
 
 install_modified_core(){
 	echo
-	DOWNLOAD_URL='https://github.com/Musixal/rathole-tunnel/raw/main/core/rathole_modified.zip'
-	
-	if [ -z "$DOWNLOAD_URL" ]; then
-        echo -e "${RED}Failed to retrieve download URL.${NC}"
-        sleep 1
+	# **اینجا به جای دانلود از URL، از فایل محلی rathole_modified_ubuntu22.zip استفاده می‌کنیم**
+    if ! extract_zip_with_python "$LOCAL_RATHOLE_MODIFIED_ZIP" "$config_dir"; then
+        colorize red "Failed to install modified Rathole Core from local file. Exiting." bold
         return 1
     fi
     
-    DOWNLOAD_DIR=$(mktemp -d)
-    echo -e "Downloading modifed rathole-core from $DOWNLOAD_URL...\n"
-    sleep 1
-    curl -sSL -o "$DOWNLOAD_DIR/rathole_modified.zip" "$DOWNLOAD_URL"
-    echo -e "Extracting Rathole...\n"
-    sleep 1
-    unzip -q "$DOWNLOAD_DIR/rathole_modified.zip" -d "$config_dir"
-    mv -f ${config_dir}/rathole_modified ${config_dir}/rathole
+    mv -f "${config_dir}/rathole_modified" "${config_dir}/rathole" # اطمینان از نام صحیح فایل
     echo -e "${GREEN}Rathole installation completed.${NC}"
-    chmod u+x ${config_dir}/rathole
-    rm -rf "$DOWNLOAD_DIR"
+    chmod u+x "${config_dir}/rathole"
     echo
 }
 
@@ -1588,17 +1612,17 @@ change_core(){
 	 	
 	colorize cyan "Select your rathole-core:" bold
 	echo
-	colorize green "1) Default Core"
-	colorize yellow "2) Modified Core (Lower connections, maybe higher latency)"
+	colorize green "1) Default Core (rathole.zip)" # تغییر در متن منو
+	colorize yellow "2) Modified Core (rathole_modified_ubuntu22.zip)" # تغییر در متن منو
 	colorize reset "3) return "
 	echo
 	read -p "Enter your choice [1-3]: " choice
 
 	case $choice in
         1) rm -f "${config_dir}/rathole" &> /dev/null 
-        download_and_extract_rathole ;;
+        download_and_extract_rathole ;; # این تابع از LOCAL_RATHOLE_ZIP استفاده می‌کند (که اکنون rathole.zip است)
         2) rm -f "${config_dir}/rathole" &> /dev/null 
-        install_modified_core;;
+        install_modified_core;; # این تابع از LOCAL_RATHOLE_MODIFIED_ZIP استفاده می‌کند (که اکنون rathole_modified_ubuntu22.zip است)
         3) return 1 ;;
         *) echo -e "${RED} Invalid option!${NC}" && sleep 1 && return 1 ;;
     esac
@@ -1629,9 +1653,9 @@ display_menu() {
     colorize red " 2. Tunnel management menu" bold
     colorize cyan " 3. Check tunnels status" bold
  	echo -e " 4. Optimize network & system limits"
- 	echo -e " 5. Install rathole core"
- 	echo -e " 6. Update & install script"
- 	echo -e " 7. Change core [experimental]"
+ 	echo -e " 5. Install rathole core (Default)" # تغییر در متن منو
+ 	echo -e " 6. Update & install script (فقط کپی آفلاین)"
+ 	echo -e " 7. Change core [experimental] (Default / Modified Ubuntu 22)" # تغییر در متن منو
  	echo -e " 8. Remove rathole core"
     echo -e " 0. Exit"
     echo
