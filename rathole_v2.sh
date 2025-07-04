@@ -117,7 +117,7 @@ install_jq() {
 # Install jq
 install_jq
 
-config_dir="/root/rathole-core" 
+config_dir="/root/rathole-core"
 
 # Function to download and extract Rathole Core
 download_and_extract_rathole() {
