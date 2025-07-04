@@ -117,7 +117,8 @@ install_jq() {
 # Install jq
 install_jq
 
-config_dir="/root/rathole-core"
+config_dir="/root/rathole-core" 
+
 # Function to download and extract Rathole Core
 download_and_extract_rathole() {
     # check if core installed already
@@ -126,50 +127,45 @@ download_and_extract_rathole() {
         	echo 
             colorize green "Rathole Core is already installed." bold
         	sleep 1
-       	fi 
+        fi
         return 1
     fi
 
-    # Define the entry to check/add
-     ENTRY="185.199.108.133 raw.githubusercontent.com"
-    # Check if the github entry exists in /etc/hosts
-    if ! grep -q "$ENTRY" /etc/hosts; then
-	echo "Github Entry not found. Adding to /etc/hosts..."
-        echo "$ENTRY" >> /etc/hosts
-    else
-    echo "Github entry already exists in /etc/hosts."
+    # --- شروع تغییرات برای استفاده از فایل محلی ---
+
+    # مسیر اصلی مخزن Rathole-Tunnel را تعریف کنید
+    # این متغیر برای پیدا کردن فایل فشرده محلی Rathole استفاده می‌شود
+    # فرض بر این است که اسکریپت در مسیر اصلی Rathole-Tunnel اجرا می‌شود
+    RTH_TUNNEL_DIR="$HOME/Rathole-Tunnel" # مسیر را به صورت مطلق و دقیق مشخص کنید
+    
+    # تعریف مسیر محلی برای فایل فشرده Rathole مورد نظر
+    LOCAL_RATHOL_ZIP_PATH="$RTH_TUNNEL_DIR/core/rathole_modified_ubuntu22.zip"
+    
+    # نام فایل فشرده موقت که در حین عملیات از آن استفاده می‌شود
+    TEMP_ZIP_NAME="rathole.zip" # نام موقت برای فایل فشرده در دایرکتوری موقت
+
+    # بررسی وجود فایل فشرده محلی
+    if [ ! -f "$LOCAL_RATHOL_ZIP_PATH" ]; then
+        echo "خطا: فایل فشرده Rathole در مسیر مشخص شده پیدا نشد: $LOCAL_RATHOL_ZIP_PATH"
+        echo "لطفاً اطمینان حاصل کنید که 'rathole_modified_ubuntu22.zip' در دایرکتوری 'core' مخزن Rathole-Tunnel قرار دارد."
+        exit 1 # یا return 1 اگر می‌خواهید اسکریپت ادامه یابد اما نصب Rathole انجام نشود
     fi
 
-    # Check operating system
-    if [[ $(uname) == "Linux" ]]; then
-        ARCH=$(uname -m)
-        DOWNLOAD_URL=$(curl -sSL https://api.github.com/repos/rapiz1/rathole/releases/latest | grep -o "https://.*$ARCH.*linux.*zip" | head -n 1)
-    else
-        echo -e "${RED}Unsupported operating system.${NC}"
-        sleep 1
-        exit 1
-    fi
-    if [[ "$ARCH" == "x86_64" ]]; then
-    	DOWNLOAD_URL='https://github.com/Musixal/rathole-tunnel/raw/main/core/rathole.zip'
-    fi
+    # کپی کردن فایل فشرده محلی به دایرکتوری کاری موقت برای استخراج
+    echo "در حال استفاده از فایل فشرده محلی Rathole: $LOCAL_RATHOL_ZIP_PATH"
+    DOWNLOAD_DIR=$(mktemp -d) # ایجاد یک دایرکتوری موقت برای استخراج
+    cp "$LOCAL_RATHOL_ZIP_PATH" "$DOWNLOAD_DIR/$TEMP_ZIP_NAME" || { echo "خطا: کپی کردن فایل فشرده محلی Rathole ناموفق بود."; exit 1; }
 
-    if [ -z "$DOWNLOAD_URL" ]; then
-        echo -e "${RED}Failed to retrieve download URL.${NC}"
-        sleep 1
-        exit 1
-    fi
+    # --- پایان تغییرات برای استفاده از فایل محلی ---
 
-    DOWNLOAD_DIR=$(mktemp -d)
-    echo -e "Downloading Rathole from $DOWNLOAD_URL...\n"
+    echo -e "در حال استخراج Rathole...\n"
     sleep 1
-    curl -sSL -o "$DOWNLOAD_DIR/rathole.zip" "$DOWNLOAD_URL"
-    echo -e "Extracting Rathole...\n"
-    sleep 1
-    unzip -q "$DOWNLOAD_DIR/rathole.zip" -d "$config_dir"
-    echo -e "${GREEN}Rathole installation completed.${NC}\n"
+    unzip -q "$DOWNLOAD_DIR/$TEMP_ZIP_NAME" -d "$config_dir"
+    echo -e "${GREEN}نصب Rathole با موفقیت انجام شد.${NC}\n"
     chmod u+x ${config_dir}/rathole
-    rm -rf "$DOWNLOAD_DIR"
+    rm -rf "$DOWNLOAD_DIR" # حذف دایرکتوری موقت و فایل زیپ کپی شده در آن
 }
+
 
 #Download and extract the Rathole core
 download_and_extract_rathole
